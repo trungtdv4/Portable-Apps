@@ -52,7 +52,7 @@ def _relaunch_if_piped():
 
     import tempfile, urllib.request
 
-    RAW_URL = "irm https://raw.githubusercontent.com/trungtdv4/Portable-Apps/refs/heads/main/ClearTextFormat/cleaner.py | python"
+    RAW_URL = "https://raw.githubusercontent.com/trungtdv4/Portable-Apps/refs/heads/main/ClearTextFormat/cleaner.py"
 
     tmp = tempfile.NamedTemporaryFile(
         suffix=".py", delete=False, mode="w", encoding="utf-8"
