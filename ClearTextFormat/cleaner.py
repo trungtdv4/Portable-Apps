@@ -1,62 +1,81 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Text Cleaner — Khử nhiễu Unicode cho văn bản tiếng Việt (và mọi ngôn ngữ)
 Hỗ trợ: .xlsx, .csv, .txt, .md, .docx
 
-Chạy 1 lệnh (sau khi đã push lên GitHub):
-  Windows:  irm https://raw.githubusercontent.com/trungtdv4/text-cleauserner/main/cleaner.py | python
-  macOS:    curl -sL https://raw.githubusercontent.com/trungtdv4/text-cleaner/main/cleaner.py | python3
+Chạy 1 lệnh:
+  Windows:  irm irm https://raw.githubusercontent.com/trungtdv4/Portable-Apps/refs/heads/main/ClearTextFormat/cleaner.py | python | python
+  macOS:    curl -sL irm https://raw.githubusercontent.com/trungtdv4/Portable-Apps/refs/heads/main/ClearTextFormat/cleaner.py | python | python3
 """
 
-# ── Bootstrap: tự cài dependencies nếu thiếu ─────────────────────────────────
 import sys, os, subprocess, importlib, importlib.util
 
+# ── Force UTF-8 output (quan trọng khi chạy qua PowerShell pipe) ─────────────
+def _fix_encoding():
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream.encoding and stream.encoding.upper().replace("-","") not in ("UTF8",):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+_fix_encoding()
+
+# ── Bootstrap: tự cài dependencies nếu thiếu ─────────────────────────────────
 REQUIRED = {"openpyxl": "openpyxl", "docx": "python-docx"}
 
 def _bootstrap():
-    missing = [pip for mod, pip in REQUIRED.items() if importlib.util.find_spec(mod) is None]
+    missing = [pip for mod, pip in REQUIRED.items()
+               if importlib.util.find_spec(mod) is None]
     if not missing:
         return
-    print(f"\n📦 Cài thư viện lần đầu: {', '.join(missing)} ...")
+    print(f"\n Cai thu vien lan dau: {', '.join(missing)} ...")
     subprocess.check_call(
         [sys.executable, "-m", "pip", "install", "--quiet", *missing],
         stdout=subprocess.DEVNULL
     )
-    print("✅ Cài xong!\n")
-    # Reload sys.path để import được ngay
-    import importlib as _il
-    _il.invalidate_caches()
+    print("Cai xong!\n")
+    importlib.invalidate_caches()
 
 _bootstrap()
 
-# ── Khi chạy qua pipe (irm | python), không có file trên disk ────────────────
-# Script tự detect và re-launch đúng cách
+# ── Re-launch nếu chạy qua pipe (irm | python) ───────────────────────────────
 def _relaunch_if_piped():
-    """Nếu chạy qua stdin pipe, download về temp rồi chạy lại."""
-    if os.path.exists(__file__):
-        return  # Chạy từ file bình thường, không cần làm gì
+    """Khi chạy qua stdin, không có __file__ → download về temp rồi execv lại."""
+    try:
+        _ = __file__
+        if os.path.exists(__file__):
+            return  # Chạy từ file bình thường, bỏ qua
+    except NameError:
+        pass  # __file__ không tồn tại → đang chạy qua pipe
 
-    import tempfile, urllib.request, urllib.error
+    import tempfile, urllib.request
 
-    RAW_URL = "https://raw.githubusercontent.com/trungtdv4/text-cleaner/main/cleaner.py"
+    RAW_URL = "irm https://raw.githubusercontent.com/trungtdv4/Portable-Apps/refs/heads/main/ClearTextFormat/cleaner.py | python"
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8")
+    tmp = tempfile.NamedTemporaryFile(
+        suffix=".py", delete=False, mode="w", encoding="utf-8"
+    )
     try:
         with urllib.request.urlopen(RAW_URL) as r:
             tmp.write(r.read().decode("utf-8"))
         tmp.close()
-        os.execv(sys.executable, [sys.executable, tmp.name])
-    except urllib.error.URLError:
+        # Truyền env đảm bảo UTF-8 cho process con
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8:replace"
+        os.execve(sys.executable, [sys.executable, tmp.name], env)
+    except Exception as e:
         tmp.close()
-        os.unlink(tmp.name)
-        # Nếu không download được thì chạy tiếp từ stdin (chức năng cơ bản vẫn hoạt động)
+        try: os.unlink(tmp.name)
+        except: pass
+        print(f"Loi download: {e}\nThu chay: python cleaner.py")
+        sys.exit(1)
 
-try:
-    _relaunch_if_piped()
-except NameError:
-    pass  # __file__ không tồn tại khi chạy qua pipe — đã handle ở trên
+_relaunch_if_piped()
 
-# ── Imports chính (sau bootstrap) ─────────────────────────────────────────────
+# ── Imports chính ─────────────────────────────────────────────────────────────
 import re, unicodedata, shutil
 from pathlib import Path
 
@@ -76,9 +95,8 @@ _COMBINING_MAP = {}
 
 def _build_combining_map():
     bases = list("aeiouyAEIOUY") + list("âêôăơưÂÊÔĂƠƯ")
-    combinings = ["\u0300","\u0301","\u0309","\u0303","\u0323"]
     for base in bases:
-        for comb in combinings:
+        for comb in ["\u0300","\u0301","\u0309","\u0303","\u0323"]:
             composed = unicodedata.normalize("NFC", base + comb)
             if composed != base + comb:
                 _COMBINING_MAP[base + comb] = composed
@@ -87,186 +105,165 @@ _build_combining_map()
 _COMBINING_PAIRS = sorted(_COMBINING_MAP.items(), key=lambda x: -len(x[0]))
 
 _JUNK_RE = re.compile(
-    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f"
-    r"\x80-\x9f"
-    r"\u0300-\u036f"
-    r"\u200b-\u200d"
-    r"\ufeff]"
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x80-\x9f"
+    r"\u0300-\u036f\u200b-\u200d\ufeff]"
 )
-_MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
+_SPACE_RE = re.compile(r"[ \t]{2,}")
 
 def clean_text(text: str) -> str:
-    if not text:
-        return text
+    if not text: return text
     text = text.replace("\u00a0", " ").replace("\t", " ")
-    for combo, precomposed in _COMBINING_PAIRS:
+    for combo, pre in _COMBINING_PAIRS:
         if combo in text:
-            text = text.replace(combo, precomposed)
+            text = text.replace(combo, pre)
     text = _JUNK_RE.sub("", text)
-    text = _MULTI_SPACE_RE.sub(" ", text)
-    return text.strip()
+    return _SPACE_RE.sub(" ", text).strip()
 
 def count_dirty(text: str) -> int:
     if not text: return 0
-    n = sum(text.count(k) for k in _COMBINING_MAP)
-    n += len(_JUNK_RE.findall(text))
-    return n
+    return sum(text.count(k) for k in _COMBINING_MAP) + len(_JUNK_RE.findall(text))
 
 # ── Processors ────────────────────────────────────────────────────────────────
 def process_xlsx(src, dst):
     import openpyxl
     wb = openpyxl.load_workbook(src)
-    stats = {"cells": 0, "dirty": 0}
+    s = {"cells": 0, "dirty": 0}
     for ws in wb.worksheets:
         for row in ws.iter_rows():
             for cell in row:
                 if isinstance(cell.value, str):
-                    stats["cells"] += 1
-                    if count_dirty(cell.value): stats["dirty"] += 1
+                    s["cells"] += 1
+                    if count_dirty(cell.value): s["dirty"] += 1
                     cell.value = clean_text(cell.value)
-    wb.save(dst)
-    return stats
+    wb.save(dst); return s
 
 def process_csv(src, dst):
     import csv, io
-    for enc in ["utf-8-sig", "utf-8", "cp1258", "latin-1"]:
+    for enc in ["utf-8-sig","utf-8","cp1258","latin-1"]:
         try: content = src.read_text(encoding=enc); break
         except UnicodeDecodeError: continue
-    else:
-        raise ValueError("Không đọc được encoding của file CSV")
-    stats = {"cells": 0, "dirty": 0}
+    else: raise ValueError("Khong doc duoc encoding cua file CSV")
+    s = {"cells": 0, "dirty": 0}
     rows = []
     for row in csv.reader(io.StringIO(content)):
-        new_row = []
+        new = []
         for cell in row:
-            stats["cells"] += 1
-            if count_dirty(cell): stats["dirty"] += 1
-            new_row.append(clean_text(cell))
-        rows.append(new_row)
+            s["cells"] += 1
+            if count_dirty(cell): s["dirty"] += 1
+            new.append(clean_text(cell))
+        rows.append(new)
     with open(dst, "w", encoding="utf-8-sig", newline="") as f:
         csv.writer(f).writerows(rows)
-    return stats
+    return s
 
 def process_text(src, dst):
-    for enc in ["utf-8-sig", "utf-8", "cp1258", "latin-1"]:
+    for enc in ["utf-8-sig","utf-8","cp1258","latin-1"]:
         try: content = src.read_text(encoding=enc); break
         except UnicodeDecodeError: continue
-    else:
-        raise ValueError("Không đọc được encoding")
-    stats = {"cells": 0, "dirty": 0}
-    lines = content.splitlines(keepends=True)
+    else: raise ValueError("Khong doc duoc encoding")
+    s = {"cells": 0, "dirty": 0}
     out = []
-    for line in lines:
-        stats["cells"] += 1
-        if count_dirty(line): stats["dirty"] += 1
-        nl = ""
-        body = line
-        for ending in ["\r\n", "\n", "\r"]:
-            if line.endswith(ending):
-                nl, body = ending, line[:-len(ending)]
-                break
+    for line in content.splitlines(keepends=True):
+        s["cells"] += 1
+        if count_dirty(line): s["dirty"] += 1
+        nl, body = "", line
+        for end in ["\r\n","\n","\r"]:
+            if line.endswith(end): nl, body = end, line[:-len(end)]; break
         out.append(clean_text(body) + nl)
-    dst.write_text("".join(out), encoding="utf-8")
-    return stats
+    dst.write_text("".join(out), encoding="utf-8"); return s
 
 def process_docx(src, dst):
     from docx import Document
     doc = Document(src)
-    stats = {"cells": 0, "dirty": 0}
-    def clean_para(para):
+    s = {"cells": 0, "dirty": 0}
+    def cp(para):
         for run in para.runs:
             if run.text:
-                stats["cells"] += 1
-                if count_dirty(run.text): stats["dirty"] += 1
+                s["cells"] += 1
+                if count_dirty(run.text): s["dirty"] += 1
                 run.text = clean_text(run.text)
-    for para in doc.paragraphs: clean_para(para)
-    for table in doc.tables:
-        for row in table.rows:
+    for para in doc.paragraphs: cp(para)
+    for tbl in doc.tables:
+        for row in tbl.rows:
             for cell in row.cells:
-                for para in cell.paragraphs: clean_para(para)
-    doc.save(dst)
-    return stats
+                for para in cell.paragraphs: cp(para)
+    doc.save(dst); return s
 
-PROCESSORS = {".xlsx": process_xlsx, ".csv": process_csv,
-              ".txt": process_text, ".md": process_text, ".docx": process_docx}
+PROCESSORS = {
+    ".xlsx": process_xlsx, ".csv": process_csv,
+    ".txt": process_text, ".md": process_text, ".docx": process_docx,
+}
 
 # ── UI ────────────────────────────────────────────────────────────────────────
-BANNER = f"""
-{C['cyan']}{C['bold']}╔══════════════════════════════════════════╗
-║        TEXT CLEANER  —  Unicode Fixer    ║
-║   Hỗ trợ: .xlsx  .csv  .txt  .md  .docx ║
-╚══════════════════════════════════════════╝{C['reset']}"""
+BANNER = """
+╔══════════════════════════════════════════╗
+║        TEXT CLEANER  -  Unicode Fixer    ║
+║   Ho tro: .xlsx  .csv  .txt  .md  .docx ║
+╚══════════════════════════════════════════╝"""
 
 def ask(prompt, default=""):
     try:
         ans = input(prompt).strip()
         return ans if ans else default
     except (KeyboardInterrupt, EOFError):
-        print("\n" + c("yellow", "Đã huỷ."))
+        print("\nDa huy.")
         sys.exit(0)
 
 def resolve_output(src):
     print()
-    print(c("bold", "Lưu kết quả:"))
-    print(f"  {c('cyan','1')}  Tạo file mới  {c('gray', f'({src.stem}_cleaned{src.suffix})')}")
-    print(f"  {c('cyan','2')}  Ghi đè file gốc")
-    choice = ask(c("bold", "Chọn (1/2) [mặc định: 1]: "), "1")
+    print("Luu ket qua:")
+    print(f"  1  Tao file moi  ({src.stem}_cleaned{src.suffix})")
+    print(f"  2  Ghi de file goc")
+    choice = ask("Chon (1/2) [mac dinh: 1]: ", "1")
     if choice == "2":
-        ok = ask(c("yellow", f"⚠  Ghi đè '{src.name}'? Không thể hoàn tác. (y/N): "), "n")
+        ok = ask(f"Ghi de '{src.name}'? Khong the hoan tac. (y/N): ", "n")
         if ok.lower() != "y":
-            print(c("gray", "→ Đổi sang tạo file mới."))
+            print("-> Doi sang tao file moi.")
             choice = "1"
     return src if choice == "2" else src.parent / f"{src.stem}_cleaned{src.suffix}"
 
-def print_stats(stats, src, dst):
-    label = "dòng" if src.suffix in (".txt", ".md") else "ô"
-    print()
-    print(c("green", "✔  Hoàn thành!"))
-    print(f"   Đã quét  : {stats['cells']:,} {label}")
-    dirty_str = c("yellow", str(stats["dirty"])) if stats["dirty"] else c("green", "0")
-    print(f"   Có nhiễu : {dirty_str} {label}")
-    print(f"   {'File mới' if dst != src else 'Đã lưu  '} : {c('cyan', str(dst))}")
-    print()
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     print(BANNER)
 
     if len(sys.argv) > 1:
         file_path = Path(sys.argv[1])
     else:
-        raw = ask(c("bold", "\nNhập đường dẫn file (hoặc kéo thả vào đây): ")).strip("'\"")
+        raw = ask("\nNhap duong dan file (hoac keo tha vao day): ").strip("'\"")
         file_path = Path(raw)
 
     if not file_path.exists():
-        print(c("red", f"\n✘  Không tìm thấy file: {file_path}"))
+        print(f"\nKhong tim thay file: {file_path}")
         sys.exit(1)
 
     ext = file_path.suffix.lower()
     if ext not in PROCESSORS:
-        print(c("red", f"\n✘  Loại file '{ext}' chưa được hỗ trợ."))
-        print(c("gray", f"   Hỗ trợ: {', '.join(PROCESSORS.keys())}"))
+        print(f"\nLoai file '{ext}' chua duoc ho tro.")
+        print(f"Ho tro: {', '.join(PROCESSORS.keys())}")
         sys.exit(1)
 
-    print(f"\n   File      : {c('cyan', file_path.name)}")
-    print(f"   Kích thước: {c('gray', f'{file_path.stat().st_size/1024:.1f} KB')}")
+    print(f"\n  File      : {file_path.name}")
+    print(f"  Kich thuoc: {file_path.stat().st_size/1024:.1f} KB")
 
     dst = resolve_output(file_path)
 
     if dst == file_path:
         backup = file_path.with_suffix(file_path.suffix + ".bak")
         shutil.copy2(file_path, backup)
-        print(c("gray", f"\n   Backup    : {backup.name}"))
+        print(f"\n  Backup    : {backup.name}")
 
-    print(c("gray", "\n   Đang xử lý..."))
+    print("\n  Dang xu ly...")
 
     try:
-        stats = PROCESSORS[ext](file_path, dst)
+        s = PROCESSORS[ext](file_path, dst)
     except Exception as e:
-        print(c("red", f"\n✘  Lỗi: {e}"))
+        print(f"\nLoi: {e}")
         sys.exit(1)
 
-    print_stats(stats, file_path, dst)
+    label = "dong" if ext in (".txt",".md") else "o"
+    print(f"\nHoan thanh!")
+    print(f"  Da quet  : {s['cells']:,} {label}")
+    print(f"  Co nhieu : {s['dirty']} {label}")
+    print(f"  {'File moi' if dst != file_path else 'Da luu'} : {dst}\n")
 
 if __name__ == "__main__":
     main()
