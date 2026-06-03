@@ -5,8 +5,8 @@ Text Cleaner — Khử nhiễu Unicode cho văn bản tiếng Việt (và mọi 
 Hỗ trợ: .xlsx, .csv, .txt, .md, .docx
 
 Chạy 1 lệnh:
-  Windows:  irm irm https://raw.githubusercontent.com/trungtdv4/Portable-Apps/refs/heads/main/ClearTextFormat/cleaner.py | python | python
-  macOS:    curl -sL irm https://raw.githubusercontent.com/trungtdv4/Portable-Apps/refs/heads/main/ClearTextFormat/cleaner.py | python | python3
+  Windows:  irm https://raw.githubusercontent.com/trungtdv4/Portable-Apps/refs/heads/main/ClearTextFormat/cleaner.py | python
+  macOS:    curl -sL https://raw.githubusercontent.com/trungtdv4/Portable-Apps/refs/heads/main/ClearTextFormat/cleaner.py | python3
 """
 
 import sys, os, subprocess, importlib, importlib.util
@@ -65,6 +65,17 @@ def _relaunch_if_piped():
         env = os.environ.copy()
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8:replace"
+        # Reconnect stdin về console/terminal thật
+        # vì pipe đã chiếm stdin, input() sẽ EOF ngay nếu không làm bước này
+        try:
+            if os.name == "nt":  # Windows
+                conin = open("CONIN$", "r")
+            else:                # macOS/Linux
+                conin = open("/dev/tty", "r")
+            os.dup2(conin.fileno(), sys.stdin.fileno())
+            conin.close()
+        except Exception:
+            pass
         os.execve(sys.executable, [sys.executable, tmp.name], env)
     except Exception as e:
         tmp.close()
